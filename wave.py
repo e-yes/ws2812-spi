@@ -30,7 +30,7 @@ def test_pattern_sin(spi, nLED=8, intensity=20):
         test_off(spi, nLED)
 
 def test_off(spi, nLED):
-    ws2812.write2812(spi, [0,0,0]*nLED)
+    ws2812.write2812(spi, [[0, 0, 0]] * nLED)
 
 if __name__=="__main__":
     spi = spidev.SpiDev()

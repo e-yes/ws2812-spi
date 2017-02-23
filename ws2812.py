@@ -1,133 +1,111 @@
 #!/usr/bin/python
-NumpyImported=False
-try:
-    import numpy
-    from numpy import sin, cos, pi
-    NumpyImported=True
-except ImportError:
-    #print("Warning: no numpy found, routines will be slow")
-    pass
 """
-T0H: 0.35   -> 2p=0.31  3p=0.47
-T0L: 0.80   -> 6p=0.94  5p=0.78
-T1H: 0.70   -> 4p=0.625 5p=0.78
-T1L: 0.60   -> 4p=0.625 3p=0.47
+Interface WS2812B led strip by SPI bus (using spidev)
 """
+import spidev
 
-def write2812_numpy8(spi,data):
-    d=numpy.array(data).ravel()
-    tx=numpy.zeros(len(d)*8, dtype=numpy.uint8)
-    for ibit in range(8):
-        #print ibit
-        #print ((d>>ibit)&1)
-        #tx[7-ibit::8]=((d>>ibit)&1)*0x18 + 0xE0   #0->3/5, 1-> 5/3 
-        #tx[7-ibit::8]=((d>>ibit)&1)*0x38 + 0xC0   #0->2/6, 1-> 5/3
-        tx[7-ibit::8]=((d>>ibit)&1)*0x78 + 0x80    #0->1/7, 1-> 5/3
-        #print [hex(v) for v in tx]
-    #print [hex(v) for v in tx]
-    spi.xfer(tx.tolist(), int(8/1.25e-6))
-    #spi.xfer(tx.tolist(), int(8e6))
-    
-def write2812_numpy4(spi,data):
-    #print spi
-    d=numpy.array(data).ravel()
-    tx=numpy.zeros(len(d)*4, dtype=numpy.uint8)
-    for ibit in range(4):
-        #print ibit
-        #print ((d>>(2*ibit))&1), ((d>>(2*ibit+1))&1)
-        tx[3-ibit::4]=((d>>(2*ibit+1))&1)*0x60 + ((d>>(2*ibit+0))&1)*0x06 +  0x88
-        #print [hex(v) for v in tx]
-    #print [hex(v) for v in tx]
-    spi.xfer(tx.tolist(), int(4/1.25e-6)) #works, on Zero (initially didn't?)
-    #spi.xfer(tx.tolist(), int(4/1.20e-6))  #works, no flashes on Zero, Works on Raspberry 3
-    #spi.xfer(tx.tolist(), int(4/1.15e-6))  #works, no flashes on Zero
-    #spi.xfer(tx.tolist(), int(4/1.05e-6))  #works, no flashes on Zero
-    #spi.xfer(tx.tolist(), int(4/.95e-6))  #works, no flashes on Zero
-    #spi.xfer(tx.tolist(), int(4/.90e-6))  #works, no flashes on Zero
-    #spi.xfer(tx.tolist(), int(4/.85e-6))  #doesn't work (first 4 LEDS work, others have flashing colors)
-    #spi.xfer(tx.tolist(), int(4/.65e-6))  #doesn't work on Zero; Works on Raspberry 3
-    #spi.xfer(tx.tolist(), int(4/.55e-6))  #doesn't work on Zero; Works on Raspberry 3
-    #spi.xfer(tx.tolist(), int(4/.50e-6))  #doesn't work on Zero; Doesn't work on Raspberry 3 (bright colors)
-    #spi.xfer(tx.tolist(), int(4/.45e-6))  #doesn't work on Zero; Doesn't work on Raspberry 3
-    #spi.xfer(tx.tolist(), int(8e6))
+# encoded byte tables
+# we present each bit as 3 bits (oversampling by a factor of 3)
+#   zero is represented as 0b100
+#   one is represented as 0b110
+# so each byte is actually represented as 3 bytes
 
-def write2812_pylist8(spi, data):
-    tx=[]
+# the following are tables to avoid repeated computations
+# and are sent via spi as high, medium, low at 3* required HZ
+ENCODE_H = (
+    0x92,
+    0x93,
+    0x9a,
+    0x9b,
+    0xd2,
+    0xd3,
+    0xda,
+    0xdb
+)
+
+ENCODE_M = (
+    0x49,
+    0x4d,
+    0x69,
+    0x6d
+)
+
+ENCODE_L = (
+    0x24,
+    0x26,
+    0x34,
+    0x36,
+    0xa4,
+    0xa6,
+    0xb4,
+    0xb6
+)
+
+SPI_XFER_SPEED = 2400000
+
+def write2812(_spi, data):
+    """
+    Encodes list of GBR led colors and sends it thru SPI bus
+    """
+    tx_data = []
     for rgb in data:
-        for byte in rgb: 
-            for ibit in range(7,-1,-1):
-                tx.append(((byte>>ibit)&1)*0x78 + 0x80)
-    spi.xfer(tx, int(8/1.25e-6))
+        for val in rgb:
+            tx_data.append(ENCODE_H[(val >> 5) & 0x07])
+            tx_data.append(ENCODE_M[(val >> 3) & 0x03])
+            tx_data.append(ENCODE_L[(val >> 0) & 0x07])
 
-def write2812_pylist4(spi, data):
-    tx=[]
-    for rgb in data:
-        for byte in rgb: 
-            for ibit in range(3,-1,-1):
-                #print ibit, byte, ((byte>>(2*ibit+1))&1), ((byte>>(2*ibit+0))&1), [hex(v) for v in tx]
-                tx.append(((byte>>(2*ibit+1))&1)*0x60 +
-                          ((byte>>(2*ibit+0))&1)*0x06 +
-                          0x88)
-    #print [hex(v) for v in tx]
-    spi.xfer(tx, int(4/1.05e-6))
+    _spi.xfer(tx_data, SPI_XFER_SPEED)
 
-
-if NumpyImported:
-    write2812=write2812_numpy4
-else:
-    write2812=write2812_pylist4    
-
-
-if __name__=="__main__":
-    import spidev
-    import time
+def __main():
     import getopt
     import sys
 
-    def test_fixed(spi):
-        #write fixed pattern for 8 LEDs
-        #This will send the following colors:
-        #   Red, Green, Blue,
-        #   Purple, Cyan, Yellow,
-        #   Black(off), White 
-        write2812(spi, [[10,0,0], [0,10,0], [0,0,10],
-                        [0,10,10], [10,0,10], [10,10,0],
-                        [0,0,0], [10,10,10]])
-    def test_off(spi, nLED=8):
-        #switch all nLED chips OFF.
-        write2812(spi, [[0,0,0]]*nLED)
-    
-    
+    def _usage():
+        pass
+
+    def test_fixed(_spi):
+        """
+        write fixed pattern for 8 LEDs
+        This will send the following colors:
+           Red, Green, Blue,
+           Purple, Cyan, Yellow,
+           Black(off), White
+        """
+        write2812(_spi, [[10, 0, 0], [0, 10, 0], [0, 0, 10],
+                         [0, 10, 10], [10, 0, 10], [10, 10, 0],
+                         [0, 0, 0], [10, 10, 10]])
+
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hn:c:t", ["help", "color=", "test"])
+        opts, _ = getopt.getopt(sys.argv[1:], "hn:c:t", ["help", "num_leds=", "color=", "test"])
     except getopt.GetoptError as err:
-        # print help information and exit:
-        print str(err) # will print something like "option -a not recognized"
-        usage()
+        print(str(err)) # will print something like "option -a not recognized"
+        _usage()
         sys.exit(2)
-    color=None
-    nLED=8
-    doTest=False
-    for o, a in opts:
-        if o in ("-h", "--help"):
-            usage()
+    color = None
+    num_leds = 8
+    do_test = False
+    for opt, arg in opts:
+        if opt in ("-h", "--help"):
+            _usage()
             sys.exit()
-        elif o in ("-c", "--color"):
-            color=a
-        elif o in ("-n", "--nLED"):
-            nLED=int(a)
-        elif o in ("-t", "--test"):
-            doTest=True
-            assert False, "unhandled option"
+        elif opt in ("-c", "--color"):
+            color = eval(arg)
+        elif opt in ("-n", "--num_leds"):
+            num_leds = int(arg)
+        elif opt in ("-t", "--test"):
+            do_test = True
+        else:
+            assert False, "unhandled option: %s" % opt
 
     spi = spidev.SpiDev()
-    spi.open(0,0)
+    spi.open(0, 0)
 
-    if color!=None:
-        write2812(spi, eval(color)*nLED)
-    elif doTest:
-        test_fixed(spi, nLED)
+    if color != None:
+        write2812(spi, color * num_leds)
+    elif do_test:
+        test_fixed(spi)
     else:
-        usage()
+        _usage()
 
-
+if __name__ == "__main__":
+    __main()
