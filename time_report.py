@@ -1,7 +1,15 @@
-import timeit
-import ws2812
 """
 Run timing report on functions
+
+New implementation (numpy-free):
+
+Raspberry Pi 2:
+write2812(num_leds=  8):   0.51 ms
+write2812(num_leds= 64):   3.29 ms
+write2812(num_leds=144):   7.74 ms
+write2812(num_leds=300):  16.14 ms
+
+Previous implementation:
 
 Raspberry Pi Zero:
 write2812_numpy4    (nLED=  8):   3.45 ms
@@ -38,22 +46,19 @@ write2812_pylist8   (nLED=144):  17.57 ms
 
 """
 
-setupFmt="import ws2812,spidev;spi=spidev.SpiDev();spi.open(0,0);n=[[i%30,4*(i%3),i%7] for i in range({nLED})];ws2812.write2812(spi, [0,0,0]*150)" #.format(nLED=8)
-stmtFmt="ws2812.{function}(spi, n)" #.format(function="write2812_numpy4")
+import timeit
 
+_SETUP = """import spidev, ws2812; spi=spidev.SpiDev();
+spi.open(0,0)
+n=[[i%30,4*(i%3),i%7] for i in range({num_leds})]
+ws2812.write2812(spi, n)
+"""
+_STMT = "ws2812.write2812(spi, n)"
+_NUM_CALLS = 200
 
-nCall=200
-for function in ["write2812_numpy4", "write2812_numpy8",
-                 "write2812_pylist4", "write2812_pylist8"
-]:
-    for nLED in [5, 64, 144, 300]:
-        if (function[-1]=='8') and nLED>170:
-            continue
-        
-        tCall=timeit.timeit(stmt=stmtFmt.format(function=function),
-                            setup=setupFmt.format(nLED=nLED),
-                            number=nCall)
-        print("{function:<20s}(nLED={nLED:3d}): {ms:6.2f} ms".format(function=function,
-                                                             nLED=nLED,
-                                                             ms=1000*tCall/nCall))
-
+for num_leds in [8, 64, 144, 300]:
+    _timeit = timeit.timeit(stmt=_STMT,
+                            setup=_SETUP.format(num_leds=num_leds),
+                            number=_NUM_CALLS)
+    print("write2812(num_leds={num_leds:3d}): {ms:6.2f} ms".format(num_leds=num_leds,
+                                                                   ms=1000 * _timeit / _NUM_CALLS))
