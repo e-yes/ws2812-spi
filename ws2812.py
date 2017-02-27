@@ -43,22 +43,36 @@ ENCODE_L = (
 
 SPI_XFER_SPEED = 2400000
 
-def write2812(_spi, data):
-    """
-    Encodes list of GBR led colors and sends it thru SPI bus
-    """
+def _prepare_tx_data(data):
     tx_data = []
     for rgb in data:
         for val in rgb:
             tx_data.append(ENCODE_H[(val >> 5) & 0x07])
             tx_data.append(ENCODE_M[(val >> 3) & 0x03])
             tx_data.append(ENCODE_L[(val >> 0) & 0x07])
+    return tx_data
 
-    _spi.xfer(tx_data, SPI_XFER_SPEED)
+def write2812(_spi, data):
+    """
+    Encodes list of GBR led colors and sends it thru SPI bus
+    """
+    _spi.xfer(_prepare_tx_data(data), SPI_XFER_SPEED)
+
+def off_leds(_spi, num_leds):
+    """
+    Helper function to switch off leds
+    """
+    data = [[0, 0, 0]] * num_leds
+    write2812(_spi, data)
 
 def __main():
     import getopt
     import sys
+    import timeit
+
+    t = timeit.timeit(stmt='_prepare_tx_data(data)',
+                      setup='from __main__ import _prepare_tx_data; data = [] * 30000')
+    print("_prepare_tx_data execution time (1M calls): %0.10f" % t)
 
     def _usage():
         pass
